@@ -10,22 +10,44 @@ import {
   detectCatalogFromContent,
 } from "./scrape-service";
 import { scoreCandidates, runCoherencePass } from "./ranking-service";
-import type { ShoppingSpec, ProductCandidate, ItemRunResult } from "@/lib/types";
+import type {
+  ShoppingSpec,
+  ProductCandidate,
+  ItemRunResult,
+  DiscoveryEvent,
+} from "@/lib/types";
 
 const MAX_URLS_PER_ITEM = 5;
 const MAX_CATALOG_EXTRACT_URLS = 6;
 
 export async function runPipeline(
   spec: ShoppingSpec,
-  maxItems?: number
+  maxItems?: number,
+  onProgress?: (event: DiscoveryEvent) => void
 ): Promise<ItemRunResult[]> {
   const items = spec.items.slice(0, maxItems ?? 8);
   const results: ItemRunResult[] = [];
   const allTopPicks: { itemName: string; candidate: ProductCandidate }[] = [];
 
+  const emit = (event: DiscoveryEvent) => onProgress?.(event);
+
   for (const item of items) {
     // 1. Search (Tavily returns rawContent with results)
+    emit({
+      type: "item-step",
+      itemId: item.id,
+      itemName: item.name,
+      step: "search",
+      status: "in_progress",
+    });
     const searchResults = await searchProductsForItem(item);
+    emit({
+      type: "item-step",
+      itemId: item.id,
+      itemName: item.name,
+      step: "search",
+      status: "complete",
+    });
 
     // 2. Select up to MAX_URLS_PER_ITEM (prioritize retailer diversity, then score)
     const selected = selectUrls(searchResults, MAX_URLS_PER_ITEM);
@@ -47,6 +69,14 @@ export async function runPipeline(
     console.log(
       `[RunManager] classified: ${productUrls.length} product/unknown, ${catalogUrls.length} catalog`
     );
+
+    emit({
+      type: "item-step",
+      itemId: item.id,
+      itemName: item.name,
+      step: "extract",
+      status: "in_progress",
+    });
 
     const candidates: ProductCandidate[] = [];
 
@@ -126,7 +156,22 @@ export async function runPipeline(
       }
     }
 
+    emit({
+      type: "item-step",
+      itemId: item.id,
+      itemName: item.name,
+      step: "extract",
+      status: "complete",
+    });
+
     // 4. Score & Rank
+    emit({
+      type: "item-step",
+      itemId: item.id,
+      itemName: item.name,
+      step: "rank",
+      status: "in_progress",
+    });
     const ranked = await scoreCandidates(
       item,
       candidates,
@@ -169,7 +214,23 @@ export async function runPipeline(
       ]
     );
 
+    emit({
+      type: "item-step",
+      itemId: item.id,
+      itemName: item.name,
+      step: "rank",
+      status: "complete",
+    });
+
     results.push({
+      itemId: item.id,
+      itemName: item.name,
+      candidates: ranked,
+      query: searchQuery,
+    });
+
+    emit({
+      type: "item-complete",
       itemId: item.id,
       itemName: item.name,
       candidates: ranked,

@@ -142,3 +142,35 @@ export interface ItemRunResult {
   candidates: ProductCandidate[];
   query: string;
 }
+
+// Discovery progress tracking
+export type DiscoveryStepName = "search" | "extract" | "rank";
+export type DiscoveryStepStatus =
+  | "pending"
+  | "in_progress"
+  | "complete"
+  | "error";
+
+export interface ItemProgress {
+  itemId: string;
+  itemName: string;
+  steps: Record<DiscoveryStepName, DiscoveryStepStatus>;
+}
+
+export type DiscoveryEvent =
+  | {
+      type: "item-step";
+      itemId: string;
+      itemName: string;
+      step: DiscoveryStepName;
+      status: DiscoveryStepStatus;
+    }
+  | {
+      type: "item-complete";
+      itemId: string;
+      itemName: string;
+      candidates: ProductCandidate[];
+      query: string;
+    }
+  | { type: "done" }
+  | { type: "error"; message: string };

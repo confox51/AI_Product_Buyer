@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { runPipeline } from "@/lib/services/run-manager";
-import type { ShoppingSpec, SpecItem } from "@/lib/types";
+import type { ShoppingSpec, SpecItem, DiscoveryEvent } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
   try {
@@ -42,9 +42,37 @@ export async function POST(request: NextRequest) {
       items,
     };
 
-    const results = await runPipeline(spec, maxItems);
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const write = (event: DiscoveryEvent) => {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
+          );
+        };
+        try {
+          await runPipeline(spec, maxItems, write);
+          write({ type: "done" });
+        } catch (error) {
+          console.error("Run plan error:", error);
+          write({
+            type: "error",
+            message:
+              error instanceof Error ? error.message : "Failed to run discovery pipeline",
+          });
+        } finally {
+          controller.close();
+        }
+      },
+    });
 
-    return NextResponse.json({ results });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
   } catch (error) {
     console.error("Run plan error:", error);
     return NextResponse.json(

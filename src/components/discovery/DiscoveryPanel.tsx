@@ -2,9 +2,17 @@
 
 import { useApp } from "@/components/AppProvider";
 import { ItemResults } from "./ItemResults";
+import { ItemProgressTile } from "./ItemProgressTile";
+
+const DEFAULT_STEPS = {
+  search: "pending" as const,
+  extract: "pending" as const,
+  rank: "pending" as const,
+};
 
 export function DiscoveryPanel() {
-  const { spec, discoveryResults, loading, addAllTopPicks } = useApp();
+  const { spec, discoveryResults, loading, itemProgress, addAllTopPicks } =
+    useApp();
 
   if (!spec) {
     return (
@@ -19,30 +27,40 @@ export function DiscoveryPanel() {
     );
   }
 
-  if (loading && discoveryResults.length === 0) {
+  const resultsByItemId = new Map(
+    discoveryResults.map((r) => [r.itemId, r])
+  );
+
+  if (loading || discoveryResults.length > 0) {
     return (
-      <div className="p-4">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">
-          Discovering Products...
-        </h2>
-        {spec.items.map((item) => (
-          <div key={item.id} className="mb-4">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-              <span className="text-sm text-gray-600">
-                Searching: {item.name}
-              </span>
-            </div>
-            <div className="space-y-2">
-              {[1, 2, 3].map((i) => (
-                <div
-                  key={i}
-                  className="bg-gray-100 rounded-lg h-24 animate-pulse"
-                />
-              ))}
-            </div>
-          </div>
-        ))}
+      <div className="p-4 overflow-y-auto h-full">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">
+            {loading ? "Discovering Products..." : "Discovery Results"}
+          </h2>
+          {!loading && discoveryResults.length > 0 && (
+            <button
+              onClick={addAllTopPicks}
+              className="bg-blue-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Add All Top Picks to Cart
+            </button>
+          )}
+        </div>
+
+        {spec.items.map((item) => {
+          const result = resultsByItemId.get(item.id);
+          if (result) {
+            return <ItemResults key={item.id} result={result} />;
+          }
+          const progress =
+            itemProgress[item.id] ?? {
+              itemId: item.id,
+              itemName: item.name,
+              steps: { ...DEFAULT_STEPS },
+            };
+          return <ItemProgressTile key={item.id} progress={progress} />;
+        })}
       </div>
     );
   }
@@ -86,23 +104,5 @@ export function DiscoveryPanel() {
     );
   }
 
-  return (
-    <div className="p-4 overflow-y-auto h-full">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">
-          Discovery Results
-        </h2>
-        <button
-          onClick={addAllTopPicks}
-          className="bg-blue-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          Add All Top Picks to Cart
-        </button>
-      </div>
-
-      {discoveryResults.map((result) => (
-        <ItemResults key={result.itemId} result={result} />
-      ))}
-    </div>
-  );
+  return null;
 }

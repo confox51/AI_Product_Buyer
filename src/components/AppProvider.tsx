@@ -9,7 +9,15 @@ import type {
   CartState,
   CheckoutPlan,
   ProductCandidate,
+  ItemProgress,
+  DiscoveryEvent,
 } from "@/lib/types";
+
+const INITIAL_STEPS = {
+  search: "pending" as const,
+  extract: "pending" as const,
+  rank: "pending" as const,
+};
 
 interface AppState {
   phase: AppPhase;
@@ -18,6 +26,7 @@ interface AppState {
   specReady: boolean;
   spec: ShoppingSpec | null;
   discoveryResults: ItemRunResult[];
+  itemProgress: Record<string, ItemProgress>;
   cart: CartState | null;
   checkoutPlan: CheckoutPlan | null;
   loading: boolean;
@@ -55,6 +64,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     specReady: false,
     spec: null,
     discoveryResults: [],
+    itemProgress: {},
     cart: null,
     checkoutPlan: null,
     loading: false,
@@ -148,7 +158,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const runDiscovery = useCallback(async () => {
     if (!state.spec) return;
-    setState((s) => ({ ...s, loading: true, error: null, discoveryResults: [] }));
+
+    const initialProgress: Record<string, ItemProgress> = {};
+    for (const item of state.spec.items) {
+      initialProgress[item.id] = {
+        itemId: item.id,
+        itemName: item.name,
+        steps: { ...INITIAL_STEPS },
+      };
+    }
+
+    setState((s) => ({
+      ...s,
+      loading: true,
+      error: null,
+      discoveryResults: [],
+      itemProgress: initialProgress,
+    }));
 
     try {
       const res = await fetch("/api/run-plan", {
@@ -156,20 +182,81 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ specId: state.spec.id }),
       });
-      const data = await res.json();
-      const results = data.results ?? [];
-      console.log(
-        "[Discovery] run-plan returned",
-        results.length,
-        "item results. Candidates per item:",
-        results.map((r: { itemName: string; candidates: unknown[] }) => `${r.itemName}: ${r.candidates?.length ?? 0}`)
-      );
 
-      setState((s) => ({
-        ...s,
-        loading: false,
-        discoveryResults: results,
-      }));
+      if (!res.ok || !res.body) {
+        throw new Error(res.statusText || "Failed to run discovery");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() ?? "";
+
+        for (const chunk of lines) {
+          const match = chunk.match(/^data:\s*(.+)$/m);
+          if (!match) continue;
+
+          let event: DiscoveryEvent;
+          try {
+            event = JSON.parse(match[1]) as DiscoveryEvent;
+          } catch {
+            continue;
+          }
+
+          if (event.type === "item-step") {
+            setState((s) => {
+              const prev = s.itemProgress[event.itemId] ?? {
+                itemId: event.itemId,
+                itemName: event.itemName,
+                steps: { ...INITIAL_STEPS },
+              };
+              return {
+                ...s,
+                itemProgress: {
+                  ...s.itemProgress,
+                  [event.itemId]: {
+                    ...prev,
+                    itemName: event.itemName,
+                    steps: { ...prev.steps, [event.step]: event.status },
+                  },
+                },
+              };
+            });
+          } else if (event.type === "item-complete") {
+            setState((s) => ({
+              ...s,
+              discoveryResults: [
+                ...s.discoveryResults,
+                {
+                  itemId: event.itemId,
+                  itemName: event.itemName,
+                  candidates: event.candidates,
+                  query: event.query,
+                },
+              ],
+            }));
+          } else if (event.type === "done") {
+            setState((s) => ({ ...s, loading: false }));
+            return;
+          } else if (event.type === "error") {
+            setState((s) => ({
+              ...s,
+              loading: false,
+              error: event.message,
+            }));
+            return;
+          }
+        }
+      }
+
+      setState((s) => ({ ...s, loading: false }));
     } catch {
       setState((s) => ({
         ...s,

@@ -35,7 +35,6 @@ export interface SpecItem {
     style?: string;
     mustHaves?: string[];
     niceToHaves?: string[];
-    keywords?: string[];
   };
   budgetAllocation: number;
   locked: boolean;

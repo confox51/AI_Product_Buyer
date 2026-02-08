@@ -23,7 +23,6 @@ interface SpecExtractionResult {
     style?: string;
     mustHaves?: string[];
     niceToHaves?: string[];
-    keywords?: string[];
   }[];
 }
 
@@ -47,7 +46,10 @@ export async function createSpecFromChat(
 - mustHaves: string[] of absolute requirements
 - niceToHaves: string[] of nice-to-have features
 - items: array of individual items to find, each with:
-  - name: descriptive name
+  - name: a concise, search-friendly product description that matches the user's specificity.
+    If the user said "Patriots jersey", use "Patriots Jersey" (don't add size/color/gender they didn't mention).
+    If the user said "men's medium navy Patriots jersey", use "Men's Medium Navy Patriots Jersey".
+    The name is used directly as the search query, so it should capture exactly what the user asked for — no more, no less.
   - category: product category
   - brand: preferred brands array or empty
   - color: preferred colors array or empty
@@ -55,7 +57,6 @@ export async function createSpecFromChat(
   - style: style description
   - mustHaves: item-specific requirements
   - niceToHaves: item-specific nice-to-haves
-  - keywords: search keywords
 
 Extract ALL items mentioned in the conversation. Be specific about constraints.`,
       },
@@ -98,7 +99,6 @@ Extract ALL items mentioned in the conversation. Be specific about constraints.`
         style: item.style,
         mustHaves: item.mustHaves,
         niceToHaves: item.niceToHaves,
-        keywords: item.keywords,
       },
       budgetAllocation: 0,
       locked: false,
@@ -179,7 +179,7 @@ export async function updateItemInSpec(
     [
       {
         role: "system",
-        content: `You are updating a shopping item's constraints based on user feedback. Return JSON with "name" and "constraints" (category, brand[], color[], size, style, mustHaves[], niceToHaves[], keywords[]).`,
+        content: `You are updating a shopping item's constraints based on user feedback. Return JSON with "name" and "constraints" (category, brand[], color[], size, style, mustHaves[], niceToHaves[]).`,
     },
     {
       role: "user",

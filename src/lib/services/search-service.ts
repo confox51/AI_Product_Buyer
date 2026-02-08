@@ -35,27 +35,7 @@ function extractDomain(url: string): string {
 }
 
 function buildSearchQuery(item: SpecItem): string {
-  const parts: string[] = [];
-
-  if (item.constraints.keywords?.length) {
-    parts.push(item.constraints.keywords.join(" "));
-  } else {
-    parts.push(item.name);
-  }
-
-  if (item.constraints.brand?.length) {
-    parts.push(item.constraints.brand[0]);
-  }
-  if (item.constraints.color?.length) {
-    parts.push(item.constraints.color[0]);
-  }
-  if (item.constraints.size) {
-    parts.push(`size ${item.constraints.size}`);
-  }
-
-  parts.push("buy online");
-
-  return parts.join(" ");
+  return item.name;
 }
 
 export async function searchProductsForItem(

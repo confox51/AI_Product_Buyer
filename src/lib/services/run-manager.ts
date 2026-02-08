@@ -164,6 +164,13 @@ export async function runPipeline(
       status: "complete",
     });
 
+    // Filter out-of-stock candidates
+    const inStockCandidates = candidates.filter((c) => c.inStock);
+    const outOfStockCount = candidates.length - inStockCandidates.length;
+    if (outOfStockCount > 0) {
+      console.log(`[RunManager] ${item.name} | filtered out-of-stock: ${outOfStockCount}`);
+    }
+
     // 4. Score & Rank
     emit({
       type: "item-step",
@@ -174,7 +181,7 @@ export async function runPipeline(
     });
     const ranked = await scoreCandidates(
       item,
-      candidates,
+      inStockCandidates,
       spec.deliveryDeadline,
       allTopPicks.map((p) => p.candidate)
     );
@@ -188,6 +195,8 @@ export async function runPipeline(
       selected.length,
       "| extracted:",
       candidates.length,
+      "| in-stock:",
+      inStockCandidates.length,
       "| ranked:",
       ranked.length
     );

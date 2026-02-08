@@ -1,4 +1,4 @@
-import { jsonCompletion, chatCompletion } from "@/lib/openai";
+import { jsonCompletion, chatCompletion, SPEC_AND_RANKING_MODEL } from "@/lib/openai";
 import type { ProductCandidate, CandidateScores, SpecItem } from "@/lib/types";
 
 const WEIGHTS = {
@@ -58,26 +58,29 @@ export async function scoreCandidates(
   // LLM-scored dimensions (batch)
   const llmScores = await jsonCompletion<{
     scores: { candidateId: string; preference: number; coherence: number }[];
-  }>([
-    {
-      role: "system",
-      content: `You are scoring product candidates for a shopper. For each candidate, assign:
+  }>(
+    [
+      {
+        role: "system",
+        content: `You are scoring product candidates for a shopper. For each candidate, assign:
 - preference: 0-1 score for how well it matches the user's stated preferences
 - coherence: 0-1 score for how well it fits with the other items they're buying
 
 Return JSON: { "scores": [{ "candidateId": "...", "preference": 0.X, "coherence": 0.X }] }`,
-    },
-    {
-      role: "user",
-      content: `Item spec: ${itemSpec.name}
+      },
+      {
+        role: "user",
+        content: `Item spec: ${itemSpec.name}
 Constraints: ${JSON.stringify(itemSpec.constraints)}
 
 Candidates:
 ${candidates.map((c) => `- ID: ${c.id}, Title: ${c.title}, Price: $${c.price}, Retailer: ${c.retailerName}, Variants: ${c.variants.join(", ")}`).join("\n")}
 
 ${otherTopPicks?.length ? `Other items in the shopping list (for coherence scoring):\n${otherTopPicks.map((p) => `- ${p.title} ($${p.price}) from ${p.retailerName}`).join("\n")}` : "No other items selected yet."}`,
-    },
-  ]);
+        },
+    ],
+    { model: SPEC_AND_RANKING_MODEL }
+  );
 
   for (const candidate of candidates) {
     const llm = llmScores.scores.find((s) => s.candidateId === candidate.id);
@@ -110,16 +113,19 @@ export async function runCoherencePass(
 
   const coherenceResult = await jsonCompletion<{
     adjustments: { candidateId: string; coherence: number }[];
-  }>([
-    {
-      role: "system",
-      content: `You are evaluating a set of shopping items for coherence (do they go well together?). For each item, provide an adjusted coherence score 0-1. Penalize clashing styles, colors, or mismatched formality levels. Return JSON: { "adjustments": [{ "candidateId": "...", "coherence": 0.X }] }`,
+  }>(
+    [
+      {
+        role: "system",
+        content: `You are evaluating a set of shopping items for coherence (do they go well together?). For each item, provide an adjusted coherence score 0-1. Penalize clashing styles, colors, or mismatched formality levels. Return JSON: { "adjustments": [{ "candidateId": "...", "coherence": 0.X }] }`,
     },
     {
       role: "user",
       content: `Selected items:\n${allTopPicks.map((p) => `- ${p.itemName}: ${p.candidate.title} ($${p.candidate.price}) from ${p.candidate.retailerName}, Variants: ${p.candidate.variants.join(", ")}`).join("\n")}`,
     },
-  ]);
+  ],
+    { model: SPEC_AND_RANKING_MODEL }
+  );
 
   for (const pick of allTopPicks) {
     const adj = coherenceResult.adjustments.find(
@@ -155,6 +161,6 @@ async function explainRanking(
         content: `Item: ${itemSpec.name}\nProduct: ${candidate.title} ($${candidate.price}) from ${candidate.retailerName}\nScores — Cost: ${scores.cost.toFixed(2)}, Delivery: ${scores.delivery.toFixed(2)}, Preference: ${scores.preference.toFixed(2)}, Coherence: ${scores.coherence.toFixed(2)}, Total: ${scores.total.toFixed(2)}`,
       },
     ],
-    { maxTokens: 150 }
+    { model: SPEC_AND_RANKING_MODEL, maxTokens: 150 }
   );
 }

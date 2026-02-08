@@ -157,11 +157,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ specId: state.spec.id }),
       });
       const data = await res.json();
+      const results = data.results ?? [];
+      console.log(
+        "[Discovery] run-plan returned",
+        results.length,
+        "item results. Candidates per item:",
+        results.map((r: { itemName: string; candidates: unknown[] }) => `${r.itemName}: ${r.candidates?.length ?? 0}`)
+      );
 
       setState((s) => ({
         ...s,
         loading: false,
-        discoveryResults: data.results,
+        discoveryResults: results,
       }));
     } catch {
       setState((s) => ({

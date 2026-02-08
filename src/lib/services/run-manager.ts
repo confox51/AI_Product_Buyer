@@ -68,6 +68,26 @@ export async function runPipeline(
       }
     }
 
+    console.log(
+      "[RunManager]",
+      item.name,
+      "| search:",
+      searchResults.length,
+      "| fetch:",
+      urlsToFetch.length,
+      "| extracted:",
+      candidates.length,
+      "| ranked:",
+      ranked.length
+    );
+    if (candidates.length === 0 && urlsToFetch.length > 0) {
+      console.log(
+        "[RunManager] No candidates extracted for",
+        item.name,
+        "— URLs were likely category/listing pages, not product pages"
+      );
+    }
+
     // 3. Score & Rank
     const ranked = await scoreCandidates(
       item,
@@ -110,5 +130,6 @@ export async function runPipeline(
     await runCoherencePass(allTopPicks);
   }
 
+  console.log("[RunManager] Pipeline complete. Returning", results.length, "item results.");
   return results;
 }

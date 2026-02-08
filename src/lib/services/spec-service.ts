@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { query } from "@/lib/db";
-import { jsonCompletion } from "@/lib/openai";
+import { jsonCompletion, SPEC_AND_RANKING_MODEL } from "@/lib/openai";
 import type { ShoppingSpec, SpecItem, Message } from "@/lib/types";
 
 interface SpecExtractionResult {
@@ -36,10 +36,11 @@ export async function createSpecFromChat(
     content: m.content,
   }));
 
-  const extracted = await jsonCompletion<SpecExtractionResult>([
-    {
-      role: "system",
-      content: `You are a shopping spec extractor. Given a conversation between a user and a shopping assistant, extract a structured shopping specification. Return JSON with:
+  const extracted = await jsonCompletion<SpecExtractionResult>(
+    [
+      {
+        role: "system",
+        content: `You are a shopping spec extractor. Given a conversation between a user and a shopping assistant, extract a structured shopping specification. Return JSON with:
 - budget: total budget in USD (number)
 - deliveryDeadline: ISO date string or null
 - preferences: { style?, occasion?, gender?, ageGroup? }
@@ -57,9 +58,11 @@ export async function createSpecFromChat(
   - keywords: search keywords
 
 Extract ALL items mentioned in the conversation. Be specific about constraints.`,
-    },
-    ...chatMessages,
-  ]);
+      },
+      ...chatMessages,
+    ],
+    { model: SPEC_AND_RANKING_MODEL }
+  );
 
   const specId = uuidv4();
   const spec: ShoppingSpec = {
@@ -128,16 +131,19 @@ export async function allocateBudget(
 
   const allocations = await jsonCompletion<{
     allocations: { name: string; percentage: number }[];
-  }>([
-    {
-      role: "system",
-      content: `You are a budget allocation assistant. Given a shopping list and total budget, distribute the budget across items based on typical category pricing. Return JSON: { "allocations": [{ "name": "item name", "percentage": 0.XX }] }. Percentages must sum to 1.0.`,
+  }>(
+    [
+      {
+        role: "system",
+        content: `You are a budget allocation assistant. Given a shopping list and total budget, distribute the budget across items based on typical category pricing. Return JSON: { "allocations": [{ "name": "item name", "percentage": 0.XX }] }. Percentages must sum to 1.0.`,
     },
     {
       role: "user",
       content: `Total budget: $${spec.budget}\nItems:\n${spec.items.map((i) => `- ${i.name} (${i.constraints.category ?? "general"})`).join("\n")}`,
     },
-  ]);
+  ],
+    { model: SPEC_AND_RANKING_MODEL }
+  );
 
   return spec.items.map((item) => {
     const alloc = allocations.allocations.find(
@@ -169,16 +175,19 @@ export async function updateItemInSpec(
   const updated = await jsonCompletion<{
     name: string;
     constraints: SpecItem["constraints"];
-  }>([
-    {
-      role: "system",
-      content: `You are updating a shopping item's constraints based on user feedback. Return JSON with "name" and "constraints" (category, brand[], color[], size, style, mustHaves[], niceToHaves[], keywords[]).`,
+  }>(
+    [
+      {
+        role: "system",
+        content: `You are updating a shopping item's constraints based on user feedback. Return JSON with "name" and "constraints" (category, brand[], color[], size, style, mustHaves[], niceToHaves[], keywords[]).`,
     },
     {
       role: "user",
       content: `Current item: ${existing.name}\nCurrent constraints: ${JSON.stringify(existing.constraints_json)}\nUser feedback: ${feedback}`,
     },
-  ]);
+  ],
+    { model: SPEC_AND_RANKING_MODEL }
+  );
 
   const specItem: SpecItem = {
     id: itemId,

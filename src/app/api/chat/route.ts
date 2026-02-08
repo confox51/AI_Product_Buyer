@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { query } from "@/lib/db";
-import { chatCompletion } from "@/lib/openai";
+import { chatCompletion, CHAT_MODEL } from "@/lib/openai";
 
 const SYSTEM_PROMPT = `You are a friendly, expert shopping assistant for an AI-powered agentic commerce platform. Your goal is to capture the user's shopping needs conversationally.
 
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     ];
 
     // Get agent response
-    const responseText = await chatCompletion(messages);
+    const responseText = await chatCompletion(messages, { model: CHAT_MODEL });
 
     // Check if spec is ready
     const specReady = responseText.includes("[SPEC_READY]");

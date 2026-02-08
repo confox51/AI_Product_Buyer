@@ -4,6 +4,9 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export default openai;
 
+export const CHAT_MODEL = "gpt-5-mini";
+export const SPEC_AND_RANKING_MODEL = "gpt-5.1";
+
 export async function chatCompletion(
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
   options?: { model?: string; temperature?: number; maxTokens?: number }

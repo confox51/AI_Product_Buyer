@@ -68,6 +68,14 @@ export async function runPipeline(
       }
     }
 
+    // 3. Score & Rank
+    const ranked = await scoreCandidates(
+      item,
+      candidates,
+      spec.deliveryDeadline,
+      allTopPicks.map((p) => p.candidate)
+    );
+
     console.log(
       "[RunManager]",
       item.name,
@@ -87,14 +95,6 @@ export async function runPipeline(
         "— URLs were likely category/listing pages, not product pages"
       );
     }
-
-    // 3. Score & Rank
-    const ranked = await scoreCandidates(
-      item,
-      candidates,
-      spec.deliveryDeadline,
-      allTopPicks.map((p) => p.candidate)
-    );
 
     // Track top pick for coherence pass
     if (ranked.length > 0) {

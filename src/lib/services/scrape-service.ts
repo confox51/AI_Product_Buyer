@@ -40,6 +40,154 @@ function extractRetailerName(domain: string): string {
   return map[domain] ?? domain.split(".")[0].charAt(0).toUpperCase() + domain.split(".")[0].slice(1);
 }
 
+// --- URL Classification ---
+
+const PRODUCT_URL_PATTERNS: Record<string, RegExp[]> = {
+  "amazon.com": [/\/dp\//, /\/gp\/product\//],
+  "walmart.com": [/\/ip\//],
+  "nike.com": [/\/t\//],
+  "nordstrom.com": [/\/s\//],
+  "macys.com": [/\/product\//],
+  "dickssportinggoods.com": [/\/p\//],
+  "rei.com": [/\/product\//],
+  "target.com": [/\/p\//],
+  "zappos.com": [/\/p\//],
+  "bestbuy.com": [/\/site\/[^/]+\/\d+\.p/],
+  "adidas.com": [/\/[A-Z0-9]{6,}\.html/],
+  "underarmour.com": [/\/p\//],
+};
+
+const CATALOG_URL_PATTERNS: Record<string, RegExp[]> = {
+  "amazon.com": [/\/s\?/, /\/s\//],
+  "walmart.com": [/\/search/, /\/browse\//],
+  "nike.com": [/\/w\//],
+  "nordstrom.com": [/\/sr\?/, /\/c\//],
+  "macys.com": [/\/shop\//],
+  "dickssportinggoods.com": [/\/c\//],
+  "rei.com": [/\/c\//,/\/search/],
+  "target.com": [/\/s\?/, /\/c\//],
+  "zappos.com": [/\/search/, /\/filters\//],
+  "bestbuy.com": [/\/searchpage/, /\/site\/searchpage/],
+  "adidas.com": [/\/search/, /\/[a-z-]+$/],
+  "underarmour.com": [/\/c\//],
+};
+
+export function classifyUrl(url: string): "product" | "catalog" | "unknown" {
+  const domain = extractDomain(url);
+
+  const productPatterns = PRODUCT_URL_PATTERNS[domain];
+  if (productPatterns?.some((p) => p.test(url))) {
+    return "product";
+  }
+
+  const catalogPatterns = CATALOG_URL_PATTERNS[domain];
+  if (catalogPatterns?.some((p) => p.test(url))) {
+    return "catalog";
+  }
+
+  return "unknown";
+}
+
+// --- Catalog Link Extraction ---
+
+export function extractProductLinksFromCatalog(
+  markdownContent: string,
+  sourceUrl: string
+): { url: string; title: string }[] {
+  const sourceDomain = extractDomain(sourceUrl);
+  const links: { url: string; title: string }[] = [];
+  const seen = new Set<string>();
+
+  // Match markdown links: [title](url)
+  const mdLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+  let match;
+  while ((match = mdLinkRegex.exec(markdownContent)) !== null) {
+    const title = match[1];
+    const url = match[2];
+    const linkDomain = extractDomain(url);
+
+    if (linkDomain !== sourceDomain) continue;
+    if (seen.has(url)) continue;
+    if (classifyUrl(url) === "catalog") continue;
+
+    // Prefer links classified as "product", also accept "unknown" with deep paths
+    const pathParts = new URL(url).pathname.split("/").filter(Boolean);
+    if (classifyUrl(url) === "product" || pathParts.length >= 2) {
+      seen.add(url);
+      links.push({ url, title });
+    }
+  }
+
+  return links.slice(0, 3);
+}
+
+// --- Catalog Content Detection ---
+
+export function detectCatalogFromContent(markdownContent: string): boolean {
+  const lower = markdownContent.toLowerCase();
+  const signals = [
+    /search results/i,
+    /showing \d+ results/i,
+    /\d+ items? found/i,
+    /sort by/i,
+    /filter by/i,
+    /refine your search/i,
+  ];
+
+  const matchCount = signals.filter((s) => s.test(lower)).length;
+  return matchCount >= 2;
+}
+
+// --- Markdown-based Extraction (for Tavily rawContent) ---
+
+export async function extractFromMarkdown(
+  markdown: string,
+  url: string,
+  itemSpec: SpecItem
+): Promise<ProductCandidate | null> {
+  const truncated = markdown.slice(0, 15000);
+
+  try {
+    const result = await jsonCompletion<ExtractedProduct>([
+      {
+        role: "system",
+        content: `Extract product information from this markdown page content. Return JSON with: title (string), price (number or null), currency (string), deliveryEstimate (string or null), deliveryDays (number or null), variants (string[]), imageUrl (string or null), inStock (boolean). The product should be a single product related to: "${itemSpec.name}". If the page contains multiple products (a listing/search page) or no clear single product, return {"title":"","price":null} to indicate failure.`,
+      },
+      {
+        role: "user",
+        content: `URL: ${url}\n\nPage content (markdown):\n${truncated}`,
+      },
+    ]);
+
+    if (!result || !result.title || !result.price) {
+      return null;
+    }
+
+    const domain = extractDomain(url);
+
+    return {
+      id: uuidv4(),
+      title: result.title,
+      price: result.price,
+      currency: result.currency ?? "USD",
+      deliveryEstimate: result.deliveryEstimate,
+      deliveryDays: result.deliveryDays,
+      variants: result.variants ?? [],
+      retailerName: extractRetailerName(domain),
+      retailerDomain: domain,
+      productUrl: url,
+      imageUrl: result.imageUrl,
+      inStock: result.inStock ?? true,
+      scores: { cost: 0, delivery: 0, preference: 0, coherence: 0, total: 0 },
+      explanation: "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+// --- Existing extraction functions (kept as fallbacks) ---
+
 function tryCheerioExtraction(
   html: string,
   _url: string

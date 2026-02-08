@@ -1,3 +1,4 @@
+import tavily from "@/lib/tavily";
 import type { SpecItem } from "@/lib/types";
 
 export interface SearchResult {
@@ -5,6 +6,8 @@ export interface SearchResult {
   url: string;
   description: string;
   retailerDomain: string;
+  rawContent: string | null;
+  score: number;
 }
 
 const RETAILER_ALLOWLIST = [
@@ -21,8 +24,6 @@ const RETAILER_ALLOWLIST = [
   "adidas.com",
   "underarmour.com",
 ];
-
-const NEGATIVE_KEYWORDS = "-pinterest -reddit -youtube -tiktok -instagram -facebook";
 
 function extractDomain(url: string): string {
   try {
@@ -53,106 +54,74 @@ function buildSearchQuery(item: SpecItem): string {
   }
 
   parts.push("buy online");
-  parts.push(NEGATIVE_KEYWORDS);
 
   return parts.join(" ");
-}
-
-async function callBraveSearch(
-  queryText: string,
-  count: number = 10
-): Promise<{ web?: { results?: BraveResult[] }; status?: number }> {
-  const params = new URLSearchParams({
-    q: queryText,
-    count: String(count),
-    country: "us",
-    search_lang: "en",
-  });
-
-  const response = await fetch(
-    `https://api.search.brave.com/res/v1/web/search?${params}`,
-    {
-      headers: {
-        Accept: "application/json",
-        "Accept-Encoding": "gzip",
-        "X-Subscription-Token": process.env.BRAVE_API_KEY!,
-      },
-    }
-  );
-
-  if (response.status === 429) {
-    const resetAfter = response.headers.get("X-RateLimit-Reset");
-    const waitMs = resetAfter ? parseInt(resetAfter) * 1000 : 2000;
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
-    return callBraveSearch(queryText, count);
-  }
-
-  if (!response.ok) {
-    throw new Error(`Brave search failed: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-interface BraveResult {
-  title: string;
-  url: string;
-  description: string;
 }
 
 export async function searchProductsForItem(
   item: SpecItem
 ): Promise<SearchResult[]> {
-  const mainQuery = buildSearchQuery(item);
-  console.log("[Brave Search] Item:", item.name, "| Query:", mainQuery);
+  const query = buildSearchQuery(item);
+  console.log("[Search] Item:", item.name, "| Query:", query);
 
-  const data = await callBraveSearch(mainQuery);
-  const rawCount = (data.web?.results ?? []).length;
-  console.log("[Brave Search] Main query returned", rawCount, "results");
-  if (rawCount > 0) {
-    (data.web?.results ?? []).slice(0, 5).forEach((r: BraveResult, i: number) => {
-      console.log(`  ${i + 1}. ${r.title} | ${r.url}`);
-    });
-    if (rawCount > 5) console.log(`  ... and ${rawCount - 5} more`);
-  }
+  const response = await tavily.search(query, {
+    searchDepth: "advanced",
+    includeRawContent: "markdown",
+    maxResults: 10,
+    includeDomains: RETAILER_ALLOWLIST,
+  });
 
-  const results: SearchResult[] = (data.web?.results ?? []).map(
-    (r: BraveResult) => ({
+  const results: SearchResult[] = (response.results ?? []).map(
+    (r: { title: string; url: string; content: string; rawContent?: string | null; score: number }) => ({
       title: r.title,
       url: r.url,
-      description: r.description,
+      description: r.content,
       retailerDomain: extractDomain(r.url),
+      rawContent: r.rawContent ?? null,
+      score: r.score,
     })
   );
+
+  console.log("[Search] Tavily returned", results.length, "results");
+  if (results.length > 0) {
+    results.slice(0, 5).forEach((r, i) => {
+      console.log(`  ${i + 1}. [${r.score.toFixed(2)}] ${r.title} | ${r.url}`);
+    });
+    if (results.length > 5) console.log(`  ... and ${results.length - 5} more`);
+  }
 
   // Check retailer diversity
   const uniqueRetailers = new Set(results.map((r) => r.retailerDomain));
 
-  if (uniqueRetailers.size < 3) {
+  if (uniqueRetailers.size < 3 && results.length > 0) {
     const missingRetailers = RETAILER_ALLOWLIST.filter(
       (r) => !uniqueRetailers.has(r)
     );
-    console.log("[Brave Search] Fewer than 3 retailers; running supplementary site: queries for", missingRetailers.slice(0, 3));
+    const supplementaryDomains = missingRetailers.slice(0, 3);
+    console.log("[Search] Fewer than 3 retailers; running supplementary search for", supplementaryDomains);
 
-    // Run supplementary site: queries for up to 3 missing retailers
-    const supplementaryQueries = missingRetailers.slice(0, 3).map((retailer) =>
-      callBraveSearch(`site:${retailer} ${item.name}`, 3)
-    );
+    try {
+      const supplementary = await tavily.search(item.name + " buy online", {
+        searchDepth: "basic",
+        includeRawContent: "markdown",
+        maxResults: 6,
+        includeDomains: supplementaryDomains,
+      });
 
-    // Sequential to respect rate limits
-    for (const queryPromise of supplementaryQueries) {
-      const supplementary = await queryPromise;
-      const extra = (supplementary.web?.results ?? []).length;
-      console.log("[Brave Search] Supplementary query returned", extra, "results");
-      const extraResults = (supplementary.web?.results ?? []).map(
-        (r: BraveResult) => ({
+      const extraResults = (supplementary.results ?? []).map(
+        (r: { title: string; url: string; content: string; rawContent?: string | null; score: number }) => ({
           title: r.title,
           url: r.url,
-          description: r.description,
+          description: r.content,
           retailerDomain: extractDomain(r.url),
+          rawContent: r.rawContent ?? null,
+          score: r.score,
         })
       );
+      console.log("[Search] Supplementary returned", extraResults.length, "results");
       results.push(...extraResults);
+    } catch (err) {
+      console.warn("[Search] Supplementary search failed:", err);
     }
   }
 
@@ -163,6 +132,7 @@ export async function searchProductsForItem(
     seen.add(r.url);
     return true;
   });
-  console.log("[Brave Search] Final results for", item.name, ":", deduped.length, "URLs (after dedupe)");
+
+  console.log("[Search] Final results for", item.name, ":", deduped.length, "URLs");
   return deduped;
 }
